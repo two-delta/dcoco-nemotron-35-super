@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two Delta makes NVIDIA Nemotron 3.5 Super even faster with DCOCO</title>
+<meta name="description" content="DCOCO, Two Delta's speculative decoding method, speeds up NVIDIA Nemotron 3.5 Super by 2.03× over vanilla decoding and 19.8% over DFlash at the same output quality.">
+<meta property="og:title" content="Two Delta makes NVIDIA Nemotron 3.5 Super even faster with DCOCO">
+<meta property="og:description" content="Same model quality, faster responses: DCOCO accepts more drafted tokens per verification pass and beats DFlash and DSpark at every tested concurrency.">
+<meta property="og:image" content="https://two-delta.github.io/dcoco-nemotron-35-super/figures/figure3_single_request.png">
+<meta property="og:type" content="article">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🥥</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,300&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0f1b2d; --muted: rgba(15, 27, 45, .62); --faint: rgba(15, 27, 45, .12);
+    --green: #2f7d32; --green-soft: #e8f5e1; --bg: #ffffff; --code-bg: #f4f9f1; --gold: #e3a21a; --gold-soft: #fdf3dc;
+    --sans: "Roboto", system-ui, sans-serif; --mono: "Roboto Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: linear-gradient(180deg, #e9f6e2 0, #f3faef 420px, var(--bg) 900px) no-repeat, var(--bg); color: var(--ink); font: 300 17px/1.7 var(--sans); -webkit-font-smoothing: antialiased; }
+  a { color: var(--green); text-decoration: none; border-bottom: 1px solid rgba(47, 125, 50, .35); }
+  a:hover { border-bottom-color: var(--green); }
+  b, strong { font-weight: 500; }
+  code { font: 400 .87em var(--mono); color: var(--green); }
+
+  /* Same layout and type as the DCOCO project page (distill.pub-style 700px column, wider figures); only the palette differs. */
+  .nav { position: sticky; top: 0; z-index: 10; background: rgba(240, 249, 236, .92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--faint); }
+  .nav-inner { max-width: 1040px; margin: 0 auto; padding: 12px 24px; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; font-size: 16px; }
+  .nav-inner .brand { font-weight: 700; color: var(--ink); border: 0; white-space: nowrap; }
+  .nav-inner .brand span { font-weight: 300; }
+  .nav-links { display: flex; gap: 20px; flex-wrap: wrap; }
+  .nav-links a { color: var(--ink); border: 0; font-weight: 400; }
+  .nav-links a:hover { color: var(--green); }
+  .title { max-width: 700px; margin: 0 auto; padding: 48px 24px 28px; }
+  .partners { display: flex; align-items: center; gap: 20px; margin: 0 0 26px; }
+  .partners img { display: block; height: 56px; width: auto; }
+  .partners .sep { width: 1px; height: 56px; background: rgba(15, 27, 45, .18); }
+  .title h1 { margin: 0 0 14px; font: 700 50px/1.1 var(--sans); letter-spacing: -.01em; }
+  .title p { margin: 0; font-size: 19px; line-height: 1.55; }
+  .byline { border-top: 1px solid var(--faint); border-bottom: 1px solid var(--faint); padding: 20px 24px; font-size: 12.8px; line-height: 1.8; }
+  .byline-grid { max-width: 652px; margin: 0 auto; display: grid; grid-template-columns: 1.3fr 1.4fr 1fr; gap: 0 24px; }
+  .byline h3 { margin: 0 0 4px; font: 500 10px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .byline .author { font-weight: 500; }
+  article { max-width: 700px; margin: 0 auto; padding: 32px 24px 64px; }
+  article > p, article li { margin: 0 0 18px; }
+  .lede { font-style: italic; }
+  h2 { margin: 56px 0 24px; padding-bottom: 14px; border-bottom: 1px solid var(--faint); font: 600 34px/1.25 var(--sans); }
+  h3 { margin: 36px 0 14px; font: 600 22px/1.35 var(--sans); }
+  h2, h3 { scroll-margin-top: 64px; }
+  figure { margin: 32px 0; }
+  figure.wide { margin-left: calc(50% - min(48vw, 520px)); margin-right: calc(50% - min(48vw, 520px)); }
+  figure img { display: block; width: 100%; height: auto; border-radius: 6px; }
+  /* Crops the caption baked into the bottom of a PNG; the aspect-ratio is the image width over the height to keep. */
+  .crop { overflow: hidden; border-radius: 6px; } .crop img { border-radius: 0; }
+  figcaption { max-width: 700px; margin: 12px auto 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+  figcaption b { color: var(--ink); font-weight: 500; }
+  .math { margin: 22px 0; overflow-x: auto; overflow-y: hidden; }
+  .katex { font-size: 1.08em; }
+  .note { padding: 14px 18px; background: var(--green-soft); border-radius: 6px; font-size: 15.5px; }
+  .note p { margin: 0 0 10px; } .note p:last-child { margin: 0; }
+  .note { margin: 24px 0; }
+  .note .math { margin: 10px 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+  .table-wrap { overflow-x: auto; margin: 28px 0 8px; }
+  .table-wrap.wide { margin-left: calc(50% - min(48vw, 520px)); margin-right: calc(50% - min(48vw, 520px)); }
+  th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--faint); white-space: nowrap; }
+  th { font-weight: 500; border-bottom: 1px solid var(--ink); }
+  th:first-child, td:first-child, td:nth-child(2) { text-align: left; }
+  th:nth-child(2) { text-align: left; }
+  td.ours { color: var(--green); font-weight: 500; background: var(--green-soft); }
+  th.ours { color: var(--green); }
+  tr.avg td { border-top: 1px solid var(--ink); font-weight: 500; }
+
+  /* Figure 1: the "These key is missing" animation, styled like the project page's walkthrough */
+  .fig1 { border: 1px solid var(--faint); border-radius: 8px; overflow: hidden; }
+  .fig1 svg { display: block; width: 100%; height: auto; background: var(--code-bg); }
+  .fig1-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--faint); font-size: 15px; line-height: 1.6; }
+  .btn { flex: none; padding: 7px 14px; border: 1px solid var(--ink); border-radius: 6px; background: #fff; color: var(--ink); font: 500 13px var(--sans); cursor: pointer; }
+  .btn:hover { background: var(--green); border-color: var(--green); color: #fff; }
+  .slot-title { fill: var(--muted); font: 500 10px var(--mono); letter-spacing: .06em; text-anchor: middle; }
+  .row-label { fill: var(--muted); font: 400 11px var(--mono); }
+  .node { fill: #fff; stroke: #bcd3b2; stroke-width: 1; transition: fill .3s, stroke .3s; }
+  .node.ok, .node.chosen { fill: var(--green-soft); stroke: var(--green); stroke-width: 1.6; }
+  .node.chosen { stroke-width: 2; }
+  .node.bad { fill: var(--gold-soft); stroke: var(--gold); stroke-width: 1.6; }
+  .tok { fill: var(--ink); font: 400 13px var(--mono); dominant-baseline: middle; text-anchor: middle; }
+  .tok.sel { font-weight: 700; fill: var(--green); }
+  .tok.bad { fill: #a86f00; }
+  .badge { opacity: 0; transition: opacity .3s; }
+  .badge.on { opacity: 1; }
+  .badge circle { stroke: #fff; stroke-width: 1.5; }
+  .badge text { fill: #fff; font: 700 10px var(--sans); text-anchor: middle; dominant-baseline: central; }
+  .badge.good circle { fill: var(--green); } .badge.bad circle { fill: var(--gold); }
+  .edge { fill: none; stroke: #9db896; stroke-width: 1; stroke-dasharray: 3 5; opacity: .45; transition: opacity .5s, stroke .3s; }
+  .edge.flow { stroke: var(--green); opacity: .5; animation: flow .9s linear infinite; }
+  .edge.naive { stroke: var(--gold); stroke-dasharray: none; stroke-width: 2.4; opacity: 1; }
+  .edge.naive.old { stroke-dasharray: 5 4; stroke-width: 1.8; opacity: .55; }
+  .edge.path { stroke: var(--green); stroke-dasharray: none; animation: none; opacity: 1; stroke-width: 2.6; }
+  .sent { font: 400 15px var(--mono); dominant-baseline: middle; opacity: 0; transition: opacity .45s; }
+  .sent.on { opacity: 1; }
+  .sent .lab { fill: var(--muted); font: 500 10px var(--mono); letter-spacing: .06em; }
+  .sent .w { fill: var(--ink); }
+  .sent .w.bad { fill: #a86f00; text-decoration: underline wavy var(--gold); }
+  .sent .w.good { fill: var(--green); font-weight: 700; }
+  .sent .mark { font: 700 16px var(--sans); }
+  .sent .mark.bad { fill: var(--gold); } .sent .mark.good { fill: var(--green); }
+  @keyframes flow { to { stroke-dashoffset: -16; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  footer { border-top: 1px solid var(--faint); padding: 24px; text-align: center; font-size: 13px; color: var(--muted); }
+  @media (max-width: 720px) {
+    body { font-size: 16px; }
+    .title { padding: 32px 16px 20px; } .title h1 { font-size: 34px; } .title p { font-size: 17px; } .partners img, .partners .sep { height: 46px; } .partners { gap: 16px; }
+    .byline { padding: 16px; } .byline-grid { grid-template-columns: 1fr 1fr; row-gap: 14px; } .byline-grid > div:last-child { grid-column: 1 / -1; }
+    article { padding: 24px 16px 48px; }
+    h2 { font-size: 27px; margin-top: 44px; } h3 { font-size: 19px; }
+    figure.wide, .table-wrap.wide { margin-left: 0; margin-right: 0; }
+    .nav-inner { padding: 10px 16px; font-size: 14px; } .nav-links { gap: 12px; }
+    .fig1-canvas { overflow-x: auto; } .fig1 svg { min-width: 560px; }
+    .nav-inner .brand span { display: none; } .nav-links a { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<nav class="nav"><div class="nav-inner">
+  <a class="brand" href="#">🥥 DCOCO <span>× Nemotron 3.5 Super</span></a>
+  <div class="nav-links">
+    <a href="https://arxiv.org/abs/2610.12570">paper</a>
+    <a href="https://github.com/two-delta/DCOCO">code</a>
+    <a href="https://two-delta.github.io/dcoco-blog/">project page</a>
+  </div>
+</div></nav>
+
+<header class="title">
+  <div class="partners"><img src="logos/td.png" alt="Two Delta"><span class="sep" aria-hidden="true"></span><img src="logos/nvidia.png" alt="NVIDIA"></div>
+  <h1>Two Delta makes NVIDIA Nemotron 3.5 Super even faster with DCOCO</h1>
+  <p>Same model quality, faster responses: DCOCO helps Nemotron 3.5 Super accept more drafted tokens per verification pass.</p>
+</header>
+
+<!-- <section class="byline"><div class="byline-grid">
+  <div><h3>By</h3><div class="author">Two Delta</div></div>
+  <div><h3>In collaboration with</h3><div class="author">NVIDIA</div></div>
+  <div><h3>Published</h3><div>Oct. 2026</div></div>
+</div></section> -->
+
+<article>
+<!-- <p class="lede">The method is described in the paper on arXiv: <a href="https://arxiv.org/abs/2610.12570">arxiv.org/abs/2610.12570</a>.</p>
+<p class="lede">Code, the vLLM image and the evaluation suite: <a href="https://github.com/two-delta/DCOCO">github.com/two-delta/DCOCO</a>. Results on Qwen3 and Llama verifiers: <a href="https://two-delta.github.io/dcoco-blog/">the DCOCO project page</a>.</p> -->
+
+<p>Through our collaboration with NVIDIA, we gained early access to Nemotron 3.5 Super VL to optimize its inference with DCOCO, our speculative decoding method. The goal is straightforward: deliver the same model quality with faster responses.</p>
+
+<p>Nemotron 3.5 Super VL is an open, customizable model combining agentic reasoning, tool use, and multimodal understanding for specialized workflows in long-running enterprise agents.</p>
+
+<p>Speculative decoding lets a small, fast drafter propose several tokens that the larger model verifies in a single pass. When multiple tokens are accepted, generation accelerates while preserving the target model’s output distribution.</p>
+
+<p>The challenge is getting more of those proposals accepted. A drafter often has the right token among its leading candidates but chooses a combination that the target model rejects. DCOCO improves those choices by combining token embeddings with contextual signals from hidden states informed by the target model’s activations. It scores candidate combinations in parallel and conditions each subsequent choice on the actual token selected.</p>
+
+<p>By improving the drafter’s proposals, <b>DCOCO helps Nemotron 3.5 Super accept more tokens per verification pass</b>, delivering more output from each pass while retaining the target model’s quality.</p>
+
+<h2 id="better-drafts">Faster inference starts with better drafts</h2>
+
+<p>To make Nemotron 3.5 Super faster, we need it to accept more tokens in each verification pass without spending the saved time on drafting.</p>
+
+<p>Parallel drafters such as <a href="https://z-lab.ai/projects/dflash">DFlash</a> generate an entire block in one pass. That makes drafting fast, but each position predicts from the existing context without knowing which tokens will be selected elsewhere in the block. <b>Individually plausible predictions can form an inconsistent sequence.</b></p>
+
+<p>Consider “These key is missing.” Each choice might make sense on its own, but the words don’t fit together. DCOCO accounts for the selected tokens: “These” favors “keys,” and “keys” then favors “are,” producing “These keys are missing.”</p>
+
+<figure class="wide">
+  <div class="fig1" id="fig1">
+    <div class="fig1-canvas"><svg viewBox="0 0 720 300" role="img" aria-labelledby="fig1-title"><title id="fig1-title">A parallel draft reads “These key is missing”; DCOCO selects “These keys are missing” from the same candidates.</title><g id="fig1-g"></g></svg></div>
+    <div class="fig1-bar"><span id="fig1-step" aria-live="polite"></span><button type="button" class="btn" id="fig1-btn">Pause</button></div>
+  </div>
+  <figcaption><b>Figure 1.</b> A parallel draft can combine individually plausible tokens into an inconsistent continuation. DCOCO uses token identities and contextual information to select a consistent path through the available candidates. Word-level example shown for illustration.</figcaption>
+</figure>
+
+<p>This consistency matters because <b>verification accepts only the tokens before the first rejection</b>. Improving an early choice can allow more of the block to pass, increasing the amount of text Nemotron generates per verification step. The correction must also stay cheap enough to deliver a net speedup.</p>
+
+<h2 id="how">How DCOCO works</h2>
+
+<p>DCOCO stands for DFlash Contextual Corrector. It sits between the parallel drafter and the target’s verification step.</p>
+
+<h3 id="candidates">Keep the leading candidates</h3>
+
+<p>DCOCO retains the top-$K$ candidates at each of the $B$ draft positions. Let $c_{i,k}$ denote candidate $k$ at position $i$, $h_i$ the drafter’s hidden state, and $\ell_i(k)$ its original logit, or score before normalization. In the example (Figures 1 and 2), a position might retain candidates “key,” “keys,” and “locks.”</p>
+
+<p>This gives the corrector alternatives to choose from. Correction is limited to that shortlist: if the desired token is absent, DCOCO cannot select it.</p>
+
+<h3 id="scoring">Score neighboring candidates in parallel</h3>
+
+<p>The correction is grounded in both which tokens are being considered and what the model knows about the context. DCOCO looks up each candidate’s embedding $\mathrm{Emb}(c_{i,k})$ in the frozen token-embedding table. This gives it an explicit representation of that candidate’s identity. It combines the embedding with the position’s hidden state $h_i$ from DFlash, whose predictions are conditioned on target-model activations from the existing prefix.</p>
+
+<p>These signals are projected into a compact space, normalized, and fused into a candidate representation $z_{i,k}$ via function $f$. In shorthand:</p>
+
+<div class="math">$$z_{i,k} = f\big(\mathrm{Emb}(c_{i,k}),\, h_i\big)$$</div>
+
+<p>The embedding tells the corrector which candidate it is evaluating; the hidden state provides contextual information for that position. DCOCO also combines the hidden states of each neighboring pair of positions into $s_p$, a shared context representation reused across all candidate pairs at those positions.</p>
+
+<p>A small shared feed-forward network, $\Delta_\theta$, uses both candidates’ fused representations, the shared pair context, and the original draft logits to compute a correction. For candidate $a$ at position $p$ and candidate $b$ at position $p+1$, the corrected transition score is:</p>
+
+<div class="math">$$S_p(a, b) = \ell_{p+1}(b) + \Delta_\theta\big(s_p,\, z_{p,a},\, z_{p+1,b},\, \ell_p(a),\, \ell_{p+1}(b)\big)$$</div>
+
+<p>The first term, $\ell_{p+1}(b)$, is the draft unary logit: the drafter’s original score for the later candidate. The second term, $\Delta_\theta$, is the learned correction. Through $z_{p,a}$ and $z_{p+1,b}$, it sees the embeddings of both candidate tokens together with their position-specific context; $s_p$ supplies their shared pair context. These inputs let it learn how the score for $b$ should change when $a$ is the predecessor in this particular context.</p>
+
+<p>For example, the embedding of “These” provides an explicit signal that can raise the score of “keys” relative to “key,” while the hidden states ground that adjustment in the surrounding text. DCOCO evaluates each candidate pair with both token identity and context available.</p>
+
+<p>Each neighboring pair of positions has $K^2$ candidate combinations. DCOCO computes all $(B-1)K^2$ transition scores together, reusing information from the existing DFlash pass. <b>The corrector adds no attention layer and requires no additional drafter pass.</b></p>
+
+<h3 id="selection">Select using the realized token identities</h3>
+
+<p>Once the scores are ready, DCOCO selects tokens from left to right. It keeps the drafter’s first choice at the first position. At each following position, it chooses the highest-scoring candidate given the token actually selected immediately before it:</p>
+
+<div class="math">$$k_1 = \arg\max_k \ell_1(k), \qquad k_{p+1} = \arg\max_b S_p(k_p, b)$$</div>
+
+<p>Here, $k_p$ is the selected candidate index at position $p$; the proposed token is $c_{p,k_p}$. Each step reads the scores associated with that selected predecessor.</p>
+
+<p>For the illustrative draft, this can turn “These key is missing” into “These keys are missing.”</p>
+
+<p>All possible predecessor identities have already been represented through their embeddings during parallel scoring. Once a token is selected, its realized identity determines which precomputed scores are used at the next position. <b>Only this short lookup-and-selection step is sequential; the neural computation has already finished.</b></p>
+
+<p>The selection rule also reflects how verification works. It prioritizes the next token in the prefix, since later tokens are useful only if the earlier ones are accepted.</p>
+
+<figure class="wide">
+  <img src="figures/main_figure.png" alt="DCOCO architecture: candidate embeddings and DFlash hidden states feed a shared MLP that scores all neighboring candidate pairs in parallel; selection follows the scores of each realized predecessor before the target verifies the block." loading="lazy">
+  <figcaption><b>Figure 2.</b> DCOCO combines candidate embeddings with DFlash hidden states informed by the target’s prefix activations. A shared MLP scores all neighboring candidate pairs in parallel. Selection then follows the scores associated with each realized predecessor, and the target verifies the selected block.</figcaption>
+</figure>
+
+<h3 id="training">How we train the corrector</h3>
+
+<p>DCOCO trains the drafter and corrector together using supervision from the target model. The drafter retains its original training objective. The corrector learns to favor candidate pairs matching the target’s preferred tokens under the training context.</p>
+
+<p>Training gives greater weight to earlier positions, where a rejection would invalidate more of the proposed block. Pairs whose target tokens are missing from the candidate lists are excluded from the correction loss.</p>
+
+<p>The corrector initially makes no adjustment: $\Delta_\theta = 0$, so $S_p(a, b) = \ell_{p+1}(b)$. Selection therefore reproduces DFlash’s original choices at initialization. Training then teaches the corrector when to change those choices. The token embeddings remain frozen.</p>
+
+<h2 id="results">Results on NVIDIA Nemotron 3.5 Super</h2>
+
+<p>In collaboration with NVIDIA, we trained DCOCO for Nemotron 3.5 Super. We compare vanilla autoregressive decoding, DFlash, <a href="https://github.com/deepseek-ai/DeepSpec">DSpark</a>, and DCOCO on ten datasets at temperatures $T = 0$ and $T = 1$. $T = 0$ uses greedy decoding; $T = 1$ uses stochastic decoding.</p>
+
+<p>The reported runs use serving concurrencies $C = 1$, 4, 8, 16, and 32. All speculative methods use the $k = 15$ setting from the evaluation tables. Evaluation is performed on NVIDIA DGX B200, using the <a href="https://github.com/vllm-project/vllm">vLLM</a> framework.</p>
+
+<p>The target remains responsible for verification. With the appropriate speculative verification rule, greedy decoding preserves the target’s token choices, and stochastic decoding preserves its output distribution.</p>
+
+<h3 id="throughput">End-to-end throughput</h3>
+
+<p>We evaluate Nemotron 3.5 Super on ten datasets spanning math, code, and general-purpose generation. The detailed breakdown below covers greedy decoding ($T = 0$) with thinking disabled. A separate summary reports averages across the same ten datasets for each of the four thinking and temperature configurations.</p>
+
+<p>Both tables report output throughput in tokens per second at concurrency $C = 1$ and tensor parallelism TP = 2, with speedup over vanilla decoding in parentheses. At $C = 1$, vanilla, DFlash, DSpark, and DCOCO average three runs at $T = 0$ and three seeds (42, 43, and 44) at $T = 1$.</p>
+
+<div class="table-wrap wide"><table>
+  <thead><tr><th>Category</th><th>Dataset</th><th>Vanilla decoding</th><th>DFlash</th><th>DSpark</th><th class="ours">DCOCO</th></tr></thead>
+  <tbody>
+    <tr><td>Math</td><td>MATH-500</td><td>205.597</td><td>405.543 (1.97×)</td><td>417.680 (2.03×)</td><td class="ours">504.653 (2.45×)</td></tr>
+    <tr><td>Math</td><td>AIME-25</td><td>208.665</td><td>430.138 (2.06×)</td><td>434.105 (2.08×)</td><td class="ours">550.280 (2.64×)</td></tr>
+    <tr><td>Math</td><td>GSM8K</td><td>194.647</td><td>383.811 (1.97×)</td><td>397.688 (2.04×)</td><td class="ours">477.271 (2.45×)</td></tr>
+    <tr><td>Code</td><td>HumanEval</td><td>201.209</td><td>417.130 (2.07×)</td><td>435.895 (2.17×)</td><td class="ours">528.126 (2.62×)</td></tr>
+    <tr><td>Code</td><td>MBPP</td><td>183.073</td><td>379.781 (2.07×)</td><td>389.463 (2.13×)</td><td class="ours">459.751 (2.51×)</td></tr>
+    <tr><td>Code</td><td>LiveCodeBench</td><td>206.277</td><td>376.635 (1.83×)</td><td>383.081 (1.86×)</td><td class="ours">459.069 (2.23×)</td></tr>
+    <tr><td>General</td><td>MT-Bench</td><td>207.044</td><td>262.870 (1.27×)</td><td>254.048 (1.23×)</td><td class="ours">293.776 (1.42×)</td></tr>
+    <tr><td>General</td><td>Arena-Hard-v2</td><td>209.235</td><td>225.824 (1.08×)</td><td>217.973 (1.04×)</td><td class="ours">250.772 (1.20×)</td></tr>
+    <tr><td>General</td><td>Alpaca</td><td>207.526</td><td>234.661 (1.13×)</td><td>231.076 (1.11×)</td><td class="ours">262.204 (1.26×)</td></tr>
+    <tr><td>General</td><td>SpeedBench</td><td>200.534</td><td>265.135 (1.32×)</td><td>266.404 (1.33×)</td><td class="ours">310.982 (1.55×)</td></tr>
+    <tr class="avg"><td>All</td><td>Average</td><td>202.381</td><td>338.153 (1.68×)</td><td>342.741 (1.70×)</td><td class="ours">409.688 (2.03×)</td></tr>
+  </tbody>
+</table></div>
+<figcaption style="margin:0 0 28px"><b>Table 1.</b> Per-dataset throughput with thinking off and $T = 0$. Throughput in tok/s at concurrency $C = 1$. DFlash, DSpark, and DCOCO use $k = 15$. Parentheses show speedup over the corresponding vanilla baseline. The Average row gives the arithmetic mean of dataset throughputs and, separately, the arithmetic mean of per-dataset speedups, giving each dataset equal weight.</figcaption>
+
+<div class="table-wrap wide"><table>
+  <thead><tr><th>Thinking</th><th>Temperature</th><th>Vanilla decoding</th><th>DFlash</th><th>DSpark</th><th class="ours">DCOCO</th></tr></thead>
+  <tbody>
+    <tr><td>Off</td><td>$T = 0$</td><td>202.381</td><td>338.153 (1.68×)</td><td>342.741 (1.70×)</td><td class="ours">409.688 (2.03×)</td></tr>
+    <tr><td>Off</td><td>$T = 1$</td><td>203.679</td><td>309.649 (1.52×)</td><td>311.967 (1.54×)</td><td class="ours">364.405 (1.79×)</td></tr>
+    <tr><td>On</td><td>$T = 0$</td><td>213.041</td><td>342.809 (1.61×)</td><td>351.878 (1.66×)</td><td class="ours">411.630 (1.94×)</td></tr>
+    <tr><td>On</td><td>$T = 1$</td><td>215.328</td><td>313.490 (1.46×)</td><td>320.575 (1.49×)</td><td class="ours">365.163 (1.70×)</td></tr>
+  </tbody>
+</table></div>
+<figcaption style="margin:0 0 28px"><b>Table 2.</b> Average throughput across the four decoding configurations. Each row averages the same ten datasets at concurrency $C = 1$ and tensor parallelism TP = 2, using the same averaging convention as Table 1. Speedups are calculated against each dataset’s vanilla baseline in the corresponding configuration before averaging.</figcaption>
+
+<div class="note">
+  <p><b>How we compute speedups.</b> For each dataset and configuration, speedup is computed against the corresponding vanilla baseline before averaging:</p>
+  <div class="math">$$\text{speedup}(\text{method}) = \frac{\text{throughput}(\text{method})}{\text{throughput}(\text{vanilla})}$$</div>
+  <p>We also report the incremental gain over DFlash:</p>
+  <div class="math">$$\text{DCOCO gain over DFlash}\ (\%) = 100 \times \left[\frac{\text{throughput}(\text{DCOCO})}{\text{throughput}(\text{DFlash})} - 1\right]$$</div>
+</div>
+
+<figure class="wide">
+  <div class="crop" style="aspect-ratio: 2203 / 957"><img src="figures/figure3_single_request.png" alt="Bar charts of mean throughput across ten datasets at concurrency 1, thinking off: DCOCO is highest at both T = 0 and T = 1, ahead of DSpark, DFlash and vanilla decoding." loading="lazy"></div>
+  <figcaption><b>Figure 3.</b> Mean throughput across ten datasets at concurrency $C = 1$, thinking off, and TP = 2. Bars are recomputed from the per-dataset measurements. The left panel uses $T = 0$ and the right panel $T = 1$.</figcaption>
+</figure>
+
+<p>With thinking disabled and one request at a time, <b>DCOCO is faster than both vanilla decoding and DFlash on all ten datasets at both temperatures</b>. Its mean per-dataset speedup over vanilla decoding is <b>2.03× at $T = 0$ and 1.79× at $T = 1$</b>. Relative to DFlash, the mean per-dataset throughput gain is 19.8% and 16.7%, respectively.</p>
+
+<h3 id="concurrency">Scaling to higher concurrency</h3>
+
+<p>To test how the gains carry over to serving multiple requests, we increase concurrency from 1 to 4, 8, 16, and 32 with thinking disabled and tensor parallelism TP = 2. We evaluate both $T = 0$ and $T = 1$ on the same ten datasets, comparing total output throughput at each serving load.</p>
+
+<p><b>DCOCO maintains higher throughput than DFlash on every dataset at every tested concurrency and temperature.</b> Across $C = 4\text{–}32$, its mean per-dataset gain over DFlash ranges from 17.8% to 22.2% at $T = 0$ and from 16.6% to 24.3% at $T = 1$. At $C = 32$, DCOCO reaches mean throughput of 3,285.679 tok/s at $T = 0$ and 3,036.602 tok/s at $T = 1$, with mean per-dataset speedups over vanilla decoding of 2.44× and 2.25×, respectively.</p>
+
+<p>DCOCO also maintains higher average throughput than DSpark at every tested concurrency and temperature. Across $C = 4\text{–}32$, its mean per-dataset gain over DSpark ranges from 12.7% to 16.3% at $T = 0$ and from 13.7% to 15.7% at $T = 1$.</p>
+
+<p>These results show that DCOCO’s throughput benefit over DFlash persists as serving concurrency increases. Average DCOCO throughput exceeds vanilla decoding, DFlash, and DSpark at every tested concurrency in both temperature settings.</p>
+
+<figure class="wide">
+  <div class="crop" style="aspect-ratio: 2576 / 1018"><img src="figures/figure4_concurrency.png" alt="Grouped bar charts of total output throughput at concurrency 1, 4, 8, 16 and 32 for T = 0 and T = 1; DCOCO's bar is the tallest in every group." loading="lazy"></div>
+  <figcaption><b>Figure 4.</b> Total output throughput as serving concurrency increases on NVIDIA Nemotron 3.5 Super with thinking off and TP = 2. Each group shows vanilla decoding (grey), DFlash (yellow), DSpark (purple) and DCOCO (light green); bars are arithmetic means over the same ten datasets. Panels use $T = 0$ and $T = 1$ with a shared, zero-based y-axis. Concurrency groups are equally spaced for comparison.</figcaption>
+</figure>
+
+<h3 id="acceptance">Draft acceptance</h3>
+
+<p>With thinking disabled, <b>DCOCO has higher reported acceptance length than both DFlash and DSpark on every dataset at every measured concurrency and temperature</b>. At $C = 1$ and $T = 0$, the means are 3.80 for DFlash, 4.12 for DSpark, and 4.80 for DCOCO. At $T = 1$, they are 3.45, 3.74, and 4.28, respectively. Across $C = 1\text{–}32$, DCOCO’s mean stays between 4.78 and 4.82 at $T = 0$ and between 4.23 and 4.28 at $T = 1$.</p>
+
+<figure class="wide">
+  <div class="crop" style="aspect-ratio: 2555 / 1018"><img src="figures/figure5_acceptance.png" alt="Grouped bar charts of acceptance length at each concurrency for T = 0 and T = 1; DCOCO stays near 4.8 and 4.3, above DSpark and DFlash." loading="lazy"></div>
+  <figcaption><b>Figure 5.</b> Reported acceptance length for DFlash (yellow), DSpark (light purple), and DCOCO (light green), averaged across ten datasets at each concurrency, with thinking off and TP = 2. Panels show $T = 0$ and $T = 1$.</figcaption>
+</figure>
+
+<p>DCOCO combines higher reported acceptance with higher average end-to-end throughput than both DFlash and DSpark at every measured serving load and temperature.</p>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>DCOCO makes Nemotron 3.5 Super even faster while preserving its output quality. By improving draft acceptance through parallel correction, with no additional drafter pass, it delivers higher throughput than DFlash across the datasets, temperatures, and concurrency levels we tested in our collaboration with NVIDIA. <b>More tokens accepted per pass means faster generation from the same model.</b></p>
+
+<p>The method, ablations and results on Qwen3 and Llama verifiers are in the paper, <a href="https://arxiv.org/abs/2610.12570">arxiv.org/abs/2610.12570</a>, and on the <a href="https://two-delta.github.io/dcoco-blog/">DCOCO project page</a>.</p>
+</article>
+
+<footer>🥥 DCOCO × NVIDIA Nemotron 3.5 Super · <a href="https://arxiv.org/abs/2610.12570">arXiv 2610.12570</a> · <a href="https://github.com/two-delta/DCOCO">GitHub</a> · <a href="https://two-delta.github.io/dcoco-blog/">Project page</a></footer>
+
+<script>
+addEventListener("DOMContentLoaded", () => renderMathInElement(document.body, {
+  delimiters: [{ left: "$$", right: "$$", display: true }, { left: "$", right: "$", display: false }],
+}));
+(() => {
+  // Figure 1. The uncorrected draft takes each position's top-1 and reads "These key is missing";
+  // DCOCO's walk over the same candidates picks "These keys are missing".
+  const cols = [["These", "The", "A"], ["key", "keys", "locks"], ["is", "are", "was"], ["missing", "here", "broken"]];
+  const naive = [0, 0, 0, 0], naiveOk = [true, false, false, true], pick = [0, 1, 1, 0];
+  const X0 = 180, DX = 150, Y0 = 72, DY = 46, NW = 108, NH = 32;
+  const g = document.getElementById("fig1-g"), ns = "http://www.w3.org/2000/svg";
+  const stepEl = document.getElementById("fig1-step"), btn = document.getElementById("fig1-btn");
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const el = (tag, attrs, parent = g, text) => {
+    const n = document.createElementNS(ns, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    if (text != null) n.textContent = text;
+    parent.append(n); return n;
+  };
+
+  // Static scene: rank labels, all K² edges between adjacent positions, candidate nodes with a ✓/✗ badge, two sentences.
+  ["top-1", "top-2", "top-3"].forEach((t, r) => el("text", { x: 30, y: Y0 + r * DY + 4, class: "row-label" }, g, t));
+  const edgeLayer = el("g", {});
+  const edges = cols.slice(1).map((_, c) => [0, 1, 2].map(a => [0, 1, 2].map(b => {
+    const x1 = X0 + c * DX + NW / 2, x2 = X0 + (c + 1) * DX - NW / 2, y1 = Y0 + a * DY, y2 = Y0 + b * DY;
+    return el("path", { d: `M${x1},${y1} C${x1 + 18},${y1} ${x2 - 18},${y2} ${x2},${y2}`, class: "edge" }, edgeLayer);
+  })));
+  const nodes = cols.map((col, c) => {
+    el("text", { x: X0 + c * DX, y: 30, class: "slot-title" }, g, `POSITION ${c + 1}`);
+    return col.map((tok, r) => {
+      const grp = el("g", { transform: `translate(${X0 + c * DX},${Y0 + r * DY})` });
+      const rect = el("rect", { x: -NW / 2, y: -NH / 2, width: NW, height: NH, rx: 4, class: "node" }, grp);
+      const label = el("text", { x: 0, y: 1, class: "tok" }, grp, tok);
+      const badge = el("g", { class: "badge", transform: `translate(${NW / 2 - 2},${-NH / 2 + 2})` }, grp);
+      el("circle", { r: 8 }, badge); const mark = el("text", { y: .5 }, badge);
+      return { rect, label, badge, mark };
+    });
+  });
+  const sentence = (y, label, words, cls, mark) => {
+    const t = el("text", { x: 30, y, class: "sent" });
+    el("tspan", { class: "lab" }, t, label);
+    words.forEach((w, i) => el("tspan", { ...(i ? { dx: 9 } : { x: X0 - NW / 2 }), class: "w " + (cls[i] || "") }, t, w));
+    el("tspan", { dx: 14, class: "mark " + mark }, t, mark === "good" ? "✓" : "✗");
+    return t;
+  };
+  const draftSent = sentence(236, "TOP-1", ["These", "key", "is", "missing"], ["", "bad", "bad"], "bad");
+  const dcocoSent = sentence(272, "DCOCO", ["These", "keys", "are", "missing"], ["good", "good", "good", "good"], "good");
+
+  const allEdges = edges.flat(2);
+  const setEdge = (e, cls) => { e.setAttribute("class", cls); if (cls !== "edge") edgeLayer.append(e); }; // highlighted edges draw on top
+  const mark = (n, state) => {
+    n.rect.setAttribute("class", "node" + (state ? " " + state : ""));
+    n.label.setAttribute("class", "tok" + (state === "chosen" ? " sel" : state === "bad" ? " bad" : ""));
+    n.badge.setAttribute("class", "badge" + (state ? " on " + (state === "bad" ? "bad" : "good") : ""));
+    n.mark.textContent = state === "bad" ? "✗" : "✓";
+  };
+  const reset = () => {
+    nodes.flat().forEach(n => mark(n, null));
+    allEdges.forEach(e => setEdge(e, "edge"));
+    draftSent.classList.remove("on"); dcocoSent.classList.remove("on");
+  };
+  const naiveStep = c => {
+    mark(nodes[c][naive[c]], naiveOk[c] ? "ok" : "bad");
+    if (c > 0) setEdge(edges[c - 1][naive[c - 1]][naive[c]], "edge naive");
+  };
+  const choose = c => {
+    mark(nodes[c][pick[c]], "chosen");
+    if (c > 0) setEdge(edges[c - 1][pick[c - 1]][pick[c]], "edge path");
+  };
+
+  // Each scene is [delay before it (ms), caption, state change]. After the last one the loop holds, then restarts.
+  const scenes = [
+    [0, "DFlash drafts every position in one pass and keeps its top-3 candidates at each. Any candidate could follow any candidate before it.", reset],
+    [2200, "Without correction, the draft takes the top-1 token at every position, regardless of what was chosen before it. “These” is right.", () => naiveStep(0)],
+    [1100, "“key” is the top-1 at position 2, but it doesn’t agree with “These.”", () => naiveStep(1)],
+    [1250, "“is” is the top-1 at position 3. It fits “key,” not the plural “These.”", () => naiveStep(2)],
+    [1250, "“These key is missing.” Verification stops at the first rejection, so only “These” is accepted.", () => { naiveStep(3); draftSent.classList.add("on"); }],
+    [2700, "DCOCO scores every neighboring pair of candidates in parallel, using token embeddings and drafter hidden states.", () => {
+      [0, 3].forEach(c => mark(nodes[c][naive[c]], null));
+      allEdges.forEach(e => setEdge(e, e.classList.contains("naive") ? "edge naive old" : "edge flow"));
+    }],
+    [2500, "Selection walks left to right, starting from the drafter’s first choice: “These.”", () => choose(0)],
+    [1050, "Given “These,” the highest-scoring successor is “keys,” not “key.”", () => choose(1)],
+    [1250, "Given “keys,” the highest-scoring successor is “are.”", () => choose(2)],
+    [1250, "Given “are,” “missing” stays.", () => {
+      choose(3);
+      allEdges.forEach(e => { if (e.classList.contains("flow")) setEdge(e, "edge"); });
+    }],
+    [900, "Same candidates, consistent path: “These keys are missing.” The target verifies the whole block.", () => dcocoSent.classList.add("on")],
+  ];
+  const HOLD = 4200;
+
+  let i = 0, timer = null, playing = false;
+  const show = k => { stepEl.textContent = scenes[k][1]; scenes[k][2](); };
+  const tick = () => {
+    show(i);
+    const next = (i + 1) % scenes.length;
+    timer = setTimeout(() => { i = next; tick(); }, next === 0 ? HOLD : scenes[next][0]);
+  };
+  const play = () => { if (playing) return; playing = true; btn.textContent = "Pause"; tick(); };
+  const pause = () => { playing = false; clearTimeout(timer); btn.textContent = "Play"; };
+
+  btn.addEventListener("click", () => playing ? pause() : (i = (i + 1) % scenes.length, play()));
+  scenes.forEach((_, k) => show(k));
+  if (reduced) { pause(); }
+  else {
+    // Run only while visible, restarting from the first scene the first time the figure scrolls into view.
+    let started = false;
+    new IntersectionObserver(([e]) => {
+      if (e.isIntersecting) { if (!started) { started = true; i = 0; } play(); }
+      else if (playing) { pause(); i = (i + scenes.length - 1) % scenes.length; }
+    }, { threshold: 0.4 }).observe(document.getElementById("fig1"));
+  }
+})();
+</script>
+</body>
+</html>
