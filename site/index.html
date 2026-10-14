@@ -105,6 +105,7 @@
   .edge.naive { stroke: var(--gold); stroke-dasharray: none; stroke-width: 2.4; opacity: 1; }
   .edge.naive.old { stroke-dasharray: 5 4; stroke-width: 1.8; opacity: .55; }
   .edge.path { stroke: var(--green); stroke-dasharray: none; animation: none; opacity: 1; stroke-width: 2.6; }
+  .edge.hidden { opacity: 0; }
   .sent { font: 400 15px var(--mono); dominant-baseline: middle; opacity: 0; transition: opacity .45s; }
   .sent.on { opacity: 1; }
   .sent .lab { fill: var(--muted); font: 500 10px var(--mono); letter-spacing: .06em; }
@@ -353,13 +354,17 @@ addEventListener("DOMContentLoaded", () => renderMathInElement(document.body, {
     parent.append(n); return n;
   };
 
-  // Static scene: rank labels, all K² edges between adjacent positions, candidate nodes with a ✓/✗ badge, two sentences.
+  // Static scene: rank labels, all K² edges between adjacent positions, the two highlighted walks on a layer
+  // above them, candidate nodes with a ✓/✗ badge, and the two sentences.
   ["top-1", "top-2", "top-3"].forEach((t, r) => el("text", { x: 30, y: Y0 + r * DY + 4, class: "row-label" }, g, t));
-  const edgeLayer = el("g", {});
-  const edges = cols.slice(1).map((_, c) => [0, 1, 2].map(a => [0, 1, 2].map(b => {
+  const curve = (c, a, b) => {
     const x1 = X0 + c * DX + NW / 2, x2 = X0 + (c + 1) * DX - NW / 2, y1 = Y0 + a * DY, y2 = Y0 + b * DY;
-    return el("path", { d: `M${x1},${y1} C${x1 + 18},${y1} ${x2 - 18},${y2} ${x2},${y2}`, class: "edge" }, edgeLayer);
-  })));
+    return `M${x1},${y1} C${x1 + 18},${y1} ${x2 - 18},${y2} ${x2},${y2}`;
+  };
+  const baseLayer = el("g", {}), walkLayer = el("g", {});
+  const edges = cols.slice(1).flatMap((_, c) => [0, 1, 2].flatMap(a => [0, 1, 2].map(b => el("path", { d: curve(c, a, b), class: "edge" }, baseLayer))));
+  const walk = (rows, cls) => rows.slice(1).map((r, c) => el("path", { d: curve(c, rows[c], r), class: cls }, walkLayer));
+  const naiveEdges = walk(naive, "edge naive"), pathEdges = walk(pick, "edge path");
   const nodes = cols.map((col, c) => {
     el("text", { x: X0 + c * DX, y: 30, class: "slot-title" }, g, `POSITION ${c + 1}`);
     return col.map((tok, r) => {
@@ -381,70 +386,74 @@ addEventListener("DOMContentLoaded", () => renderMathInElement(document.body, {
   const draftSent = sentence(236, "TOP-1", ["These", "key", "is", "missing"], ["", "bad", "bad"], "bad");
   const dcocoSent = sentence(272, "DCOCO", ["These", "keys", "are", "missing"], ["good", "good", "good", "good"], "good");
 
-  const allEdges = edges.flat(2);
-  const setEdge = (e, cls) => { e.setAttribute("class", cls); if (cls !== "edge") edgeLayer.append(e); }; // highlighted edges draw on top
-  const mark = (n, state) => {
-    n.rect.setAttribute("class", "node" + (state ? " " + state : ""));
-    n.label.setAttribute("class", "tok" + (state === "chosen" ? " sel" : state === "bad" ? " bad" : ""));
-    n.badge.setAttribute("class", "badge" + (state ? " on " + (state === "bad" ? "bad" : "good") : ""));
+  // Scenes are [delay before it (ms), caption]. render(k) derives the whole picture from k alone, so pausing,
+  // scrolling away or jumping never leaves a stale state behind. Only changed classes animate.
+  const scenes = [
+    [0, "DFlash drafts every position in one pass and keeps its top-3 candidates at each. Any candidate could follow any candidate before it."],
+    [2200, "Without correction, the draft takes the top-1 token at every position, regardless of what was chosen before it. “These” is right."],
+    [1100, "“key” is the top-1 at position 2, but it doesn’t agree with “These.”"],
+    [1250, "“is” is the top-1 at position 3. It fits “key,” not the plural “These.”"],
+    [1250, "“These key is missing.” Verification stops at the first rejection, so only “These” is accepted."],
+    [2700, "DCOCO scores every neighboring pair of candidates in parallel, using token embeddings and drafter hidden states."],
+    [2500, "Selection walks left to right, starting from the drafter’s first choice: “These.”"],
+    [1050, "Given “These,” the highest-scoring successor is “keys,” not “key.”"],
+    [1250, "Given “keys,” the highest-scoring successor is “are.”"],
+    [1250, "Given “are,” “missing” stays."],
+    [900, "Same candidates, consistent path: “These keys are missing.” The target verifies the whole block."],
+  ];
+  const HOLD = 4200, LAST = scenes.length - 1;
+  const NAIVE = 1, SCORE = 5, SELECT = 6, DONE = 10; // first scene of each phase
+
+  const setClass = (n, cls) => { if (n.getAttribute("class") !== cls) n.setAttribute("class", cls); };
+  const markNode = (n, state) => {
+    setClass(n.rect, "node" + (state ? " " + state : ""));
+    setClass(n.label, "tok" + (state === "chosen" ? " sel" : state === "bad" ? " bad" : ""));
+    setClass(n.badge, "badge" + (state ? " on " + (state === "bad" ? "bad" : "good") : ""));
     n.mark.textContent = state === "bad" ? "✗" : "✓";
   };
-  const reset = () => {
-    nodes.flat().forEach(n => mark(n, null));
-    allEdges.forEach(e => setEdge(e, "edge"));
-    draftSent.classList.remove("on"); dcocoSent.classList.remove("on");
-  };
-  const naiveStep = c => {
-    mark(nodes[c][naive[c]], naiveOk[c] ? "ok" : "bad");
-    if (c > 0) setEdge(edges[c - 1][naive[c - 1]][naive[c]], "edge naive");
-  };
-  const choose = c => {
-    mark(nodes[c][pick[c]], "chosen");
-    if (c > 0) setEdge(edges[c - 1][pick[c - 1]][pick[c]], "edge path");
-  };
+  function render(k) {
+    stepEl.textContent = scenes[k][1];
+    nodes.forEach((col, c) => col.forEach((n, r) => {
+      let state = null;
+      if (r === pick[c] && k >= SELECT + c) state = "chosen";
+      else if (r === naive[c] && k >= NAIVE + c) state = naiveOk[c] ? (k < SCORE ? "ok" : null) : "bad"; // naive mistakes stay marked
+      markNode(n, state);
+    }));
+    edges.forEach(e => setClass(e, k >= SCORE && k < SELECT + 3 ? "edge flow" : "edge"));
+    naiveEdges.forEach((e, c) => setClass(e, k < NAIVE + c + 1 ? "edge naive hidden" : k >= SCORE ? "edge naive old" : "edge naive"));
+    pathEdges.forEach((e, c) => setClass(e, k >= SELECT + c + 1 ? "edge path" : "edge path hidden"));
+    draftSent.classList.toggle("on", k >= NAIVE + 3);
+    dcocoSent.classList.toggle("on", k >= DONE);
+  }
 
-  // Each scene is [delay before it (ms), caption, state change]. After the last one the loop holds, then restarts.
-  const scenes = [
-    [0, "DFlash drafts every position in one pass and keeps its top-3 candidates at each. Any candidate could follow any candidate before it.", reset],
-    [2200, "Without correction, the draft takes the top-1 token at every position, regardless of what was chosen before it. “These” is right.", () => naiveStep(0)],
-    [1100, "“key” is the top-1 at position 2, but it doesn’t agree with “These.”", () => naiveStep(1)],
-    [1250, "“is” is the top-1 at position 3. It fits “key,” not the plural “These.”", () => naiveStep(2)],
-    [1250, "“These key is missing.” Verification stops at the first rejection, so only “These” is accepted.", () => { naiveStep(3); draftSent.classList.add("on"); }],
-    [2700, "DCOCO scores every neighboring pair of candidates in parallel, using token embeddings and drafter hidden states.", () => {
-      [0, 3].forEach(c => mark(nodes[c][naive[c]], null));
-      allEdges.forEach(e => setEdge(e, e.classList.contains("naive") ? "edge naive old" : "edge flow"));
-    }],
-    [2500, "Selection walks left to right, starting from the drafter’s first choice: “These.”", () => choose(0)],
-    [1050, "Given “These,” the highest-scoring successor is “keys,” not “key.”", () => choose(1)],
-    [1250, "Given “keys,” the highest-scoring successor is “are.”", () => choose(2)],
-    [1250, "Given “are,” “missing” stays.", () => {
-      choose(3);
-      allEdges.forEach(e => { if (e.classList.contains("flow")) setEdge(e, "edge"); });
-    }],
-    [900, "Same candidates, consistent path: “These keys are missing.” The target verifies the whole block.", () => dcocoSent.classList.add("on")],
-  ];
-  const HOLD = 4200;
-
-  let i = 0, timer = null, playing = false;
-  const show = k => { stepEl.textContent = scenes[k][1]; scenes[k][2](); };
-  const tick = () => {
-    show(i);
-    const next = (i + 1) % scenes.length;
-    timer = setTimeout(() => { i = next; tick(); }, next === 0 ? HOLD : scenes[next][0]);
+  // One timer drives playback. It runs only while the figure is visible and the reader hasn't paused it.
+  // `left` is how long the current scene still has on screen, so a pause resumes the countdown instead of restarting it.
+  let k = 0, timer = null, visible = false, userPaused = reduced, left = null, since = 0;
+  const duration = () => k === LAST ? HOLD : scenes[k + 1][0];
+  const schedule = () => {
+    if (timer) { clearTimeout(timer); timer = null; left -= performance.now() - since; }
+    if (!visible || userPaused) return;
+    if (left == null) left = duration();
+    since = performance.now();
+    timer = setTimeout(() => { timer = null; k = k === LAST ? 0 : k + 1; left = null; render(k); schedule(); }, Math.max(0, left));
   };
-  const play = () => { if (playing) return; playing = true; btn.textContent = "Pause"; tick(); };
-  const pause = () => { playing = false; clearTimeout(timer); btn.textContent = "Play"; };
-
-  btn.addEventListener("click", () => playing ? pause() : (i = (i + 1) % scenes.length, play()));
-  scenes.forEach((_, k) => show(k));
-  if (reduced) { pause(); }
-  else {
-    // Run only while visible, restarting from the first scene the first time the figure scrolls into view.
+  const syncButton = () => { btn.textContent = userPaused ? "Play" : "Pause"; };
+  btn.addEventListener("click", () => { userPaused = !userPaused; syncButton(); schedule(); });
+  render(LAST); syncButton();
+  if (!reduced) {
+    // Start from the first scene the first time the figure scrolls into view; afterwards resume where it left off.
     let started = false;
     new IntersectionObserver(([e]) => {
-      if (e.isIntersecting) { if (!started) { started = true; i = 0; } play(); }
-      else if (playing) { pause(); i = (i + scenes.length - 1) % scenes.length; }
+      visible = e.isIntersecting;
+      if (visible && !started) { started = true; k = 0; left = null; render(0); }
+      schedule();
     }, { threshold: 0.4 }).observe(document.getElementById("fig1"));
+    // Background tabs throttle timers; stop while hidden and pick up again from the same scene.
+    document.addEventListener("visibilitychange", () => {
+      const r = document.getElementById("fig1").getBoundingClientRect();
+      visible = !document.hidden && r.bottom > 0 && r.top < innerHeight;
+      schedule();
+    });
   }
 })();
 </script>
